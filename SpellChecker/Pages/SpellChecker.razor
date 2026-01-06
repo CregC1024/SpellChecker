@@ -1,0 +1,300 @@
+@page "/spellchecker"
+@using System.Text.RegularExpressions
+@using System.Linq
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+
+<PageTitle>Spell Checker</PageTitle>
+
+<div class="spell-checker-container">
+    <h1>Spell Checker</h1>
+    
+    <div class="input-section">
+        <div class="form-group">
+            <label for="inputText">Enter your text:</label>
+            <textarea @bind="InputText" 
+                     @bind:event="oninput"
+                     class="form-control" 
+                     id="inputText" 
+                     rows="10" 
+                     placeholder="Type or paste your text here..."></textarea>
+        </div>
+        
+        <div class="actions">
+            <button @onclick="CheckSpelling" class="btn btn-primary">Check Spelling</button>
+            <button @onclick="ClearText" class="btn btn-secondary">Clear</button>
+            <div class="form-check form-switch">
+                <input type="checkbox" class="form-check-input" id="autoCheck" @bind="AutoCheck" />
+                <label class="form-check-label" for="autoCheck">Check as you type</label>
+            </div>
+        </div>
+    </div>
+
+    @if (IsLoading)
+    {
+        <div class="alert alert-info mt-3">
+            <div class="spinner-border spinner-border-sm" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            @StatusMessage
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(StatusMessage))
+    {
+        <div class="alert @(MisspelledWords.Any() ? "alert-warning" : "alert-success") mt-3">
+            @StatusMessage
+        </div>
+    }
+
+    @if (MisspelledWords.Any())
+    {
+        <div class="results mt-3">
+            <h4>Misspelled Words:</h4>
+            <div class="misspelled-words">
+                @foreach (var wordInfo in MisspelledWords)
+                {
+                    <div class="misspelled-word-container mb-2">
+                        <span class="badge bg-danger me-2">@wordInfo.Word</span>
+                        @if (wordInfo.Suggestions?.Any() == true)
+                        {
+                            <span class="suggestions">
+                                Suggestions: 
+                                @foreach (var suggestion in wordInfo.Suggestions)
+                                {
+                                    <a href="#" @onclick:preventDefault 
+                                       @onclick="() => UseSuggestion(wordInfo.Word, suggestion)"
+                                       class="suggestion-link" title="Click to use this suggestion">
+                                        @suggestion
+                                    </a>
+                                    @if (suggestion != wordInfo.Suggestions.Last())
+                                    {
+                                        <span>, </span>
+                                    }
+                                }
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="text-muted">No suggestions available</span>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Inject] 
+    private IJSRuntime JSRuntime { get; set; } = null!;
+    private IJSObjectReference? _module;
+    
+    private string InputText { get; set; } = string.Empty;
+    private List<MisspelledWord> MisspelledWords { get; set; } = new();
+    private bool AutoCheck { get; set; } = true;
+    private bool IsLoading { get; set; } = false;
+    private string StatusMessage { get; set; } = "";
+    
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Load the JavaScript module
+            _module = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/spellChecker.js");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error initializing spell checker: {ex.Message}");
+        }
+    }
+    
+    private async Task CheckSpelling()
+    {
+        try
+        {
+            IsLoading = true;
+            StatusMessage = "Checking spelling...";
+            
+            if (string.IsNullOrWhiteSpace(InputText))
+            {
+                MisspelledWords.Clear();
+                StatusMessage = "No text to check.";
+                return;
+            }
+
+            // Split text into words, handling contractions and apostrophes
+            var words = Regex.Matches(InputText, "[a-zA-Z']+")
+                            .Select(m => m.Value)
+                            .Where(w => w.Length > 1) // Skip single letters
+                            .Distinct()
+                            .ToList();
+
+            if (!words.Any())
+            {
+                StatusMessage = "No valid words to check.";
+                return;
+            }
+
+            var misspelled = new List<MisspelledWord>();
+            int checkedCount = 0;
+            
+            foreach (var word in words)
+            {
+                try 
+                {
+                    var result = await JSRuntime.InvokeAsync<SpellCheckResult>("spellCheck.checkSpelling", word);
+                    if (!result.IsCorrect)
+                    {
+                        misspelled.Add(new MisspelledWord { 
+                            Word = word, 
+                            Suggestions = result.Suggestions?.Take(3).ToList() 
+                        });
+                    }
+                    checkedCount++;
+                    
+                    // Update status periodically for better UX
+                    if (checkedCount % 5 == 0)
+                    {
+                        StatusMessage = $"Checked {checkedCount} of {words.Count} words...";
+                        StateHasChanged();
+                        await Task.Delay(1); // Allow UI to update
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error checking word '{word}': {ex.Message}");
+                }
+            }
+
+            MisspelledWords = misspelled;
+            StatusMessage = misspelled.Any() 
+                ? $"Found {misspelled.Count} misspelled word(s)" 
+                : "No spelling errors found!";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"An error occurred: {ex.Message}";
+            Console.WriteLine($"Error in CheckSpelling: {ex}");
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task OnTextChanged(ChangeEventArgs e)
+    {
+        if (AutoCheck)
+        {
+            await CheckSpelling();
+        }
+    }
+
+    private void ClearText()
+    {
+        InputText = string.Empty;
+        MisspelledWords.Clear();
+        StatusMessage = "";
+    }
+
+    private async Task UseSuggestion(string originalWord, string suggestion)
+    {
+        if (string.IsNullOrEmpty(InputText) || string.IsNullOrEmpty(originalWord) || string.IsNullOrEmpty(suggestion))
+        {
+            return;
+        }
+
+        // Replace all occurrences of the misspelled word with the suggestion
+        InputText = Regex.Replace(InputText, $@"\b{Regex.Escape(originalWord)}\b", suggestion, RegexOptions.IgnoreCase);
+        
+        // Re-check spelling after replacement
+        await CheckSpelling();
+    }
+    
+    public class SpellCheckResult
+    {
+        public bool IsCorrect { get; set; }
+        public string[] Suggestions { get; set; } = Array.Empty<string>();
+    }
+    
+    public class MisspelledWord
+    {
+        public string Word { get; set; } = string.Empty;
+        public List<string>? Suggestions { get; set; }
+    }
+    
+    public async ValueTask DisposeAsync()
+    {
+        if (_module != null)
+        {
+            await _module.DisposeAsync();
+        }
+    }
+}
+
+<style>
+    .spell-checker-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+
+    .input-section {
+        margin-bottom: 20px;
+    }
+
+    .form-group {
+        margin-bottom: 15px;
+    }
+
+    .form-control {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 16px;
+    }
+
+    .actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 10px;
+    }
+
+    .btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    .btn-primary {
+        background-color: #007bff;
+        color: white;
+    }
+
+    .btn-secondary {
+        background-color: #6c757d;
+        color: white;
+    }
+
+    .misspelled-words {
+        list-style-type: none;
+        padding: 0;
+    }
+
+    .misspelled-words li {
+        padding: 5px 10px;
+        background-color: #fff3f3;
+        margin-bottom: 5px;
+        border-left: 3px solid #dc3545;
+    }
+
+    .results {
+        margin-top: 20px;
+        padding: 15px;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+    }
+</style>

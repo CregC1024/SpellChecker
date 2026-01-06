@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SpellChecker</title>
+    <base href="/" />
+    <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link href="SpellChecker.styles.css" rel="stylesheet" />
+    <link href="manifest.webmanifest" rel="manifest" />
+    <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
+</head>
+
+<body>
+    <div id="app">
+        <svg class="loading-progress">
+            <circle r="40%" cx="50%" cy="50%" />
+            <circle r="40%" cx="50%" cy="50%" />
+        </svg>
+        <div class="loading-progress-text"></div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="." class="reload">Reload</a>
+        <span class="dismiss">🗙</span>
+    </div>
+    <script src="_framework/blazor.webassembly.js"></script>
+    <script>
+        // Initialize the dictionary with more words
+        const dictionary = new Set([
+            // Common words
+            'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'i', 'it', 'for', 'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at',
+            'this', 'but', 'his', 'by', 'from', 'they', 'we', 'say', 'her', 'she', 'or', 'an', 'will', 'my', 'one', 'all', 'would', 'there', 'their', 'what',
+            'up', 'out', 'if', 'about', 'who', 'get', 'which', 'go', 'me', 'when', 'make', 'can', 'like', 'time', 'no', 'just', 'him', 'know', 'take', 'people',
+            'into', 'year', 'your', 'good', 'some', 'could', 'them', 'see', 'other', 'than', 'then', 'now', 'look', 'only', 'come', 'its', 'over', 'think', 'also',
+            'back', 'after', 'use', 'two', 'how', 'our', 'work', 'first', 'well', 'way', 'even', 'new', 'want', 'because', 'any', 'these', 'give', 'day', 'most', 'us',
+            'spell', 'check', 'text', 'word', 'words', 'dictionary', 'checking', 'correct', 'incorrect', 'spelling',
+            'suggestion', 'suggestions', 'helpful', 'writing', 'grammar', 'mistake', 'mistakes', 'fix', 'typo', 'typos'
+        ]);
+
+        // Register the service worker
+        navigator.serviceWorker.register('service-worker.js');
+        
+        // Calculate Levenshtein distance between two words
+        function levenshteinDistance(a, b) {
+            const matrix = [];
+            for (let i = 0; i <= b.length; i++) {
+                matrix[i] = [i];
+            }
+            for (let j = 0; j <= a.length; j++) {
+                matrix[0][j] = j;
+            }
+            for (let i = 1; i <= b.length; i++) {
+                for (let j = 1; j <= a.length; j++) {
+                    const cost = a[j - 1] === b[i - 1] ? 0 : 1;
+                    matrix[i][j] = Math.min(
+                        matrix[i - 1][j] + 1,
+                        matrix[i][j - 1] + 1,
+                        matrix[i - 1][j - 1] + cost
+                    );
+                }
+            }
+            return matrix[b.length][a.length];
+        }
+
+        // Get spelling suggestions for a word
+        function getSuggestions(word, maxDistance = 2, maxSuggestions = 5) {
+            const suggestions = [];
+            const lowerWord = word.toLowerCase();
+            
+            // Check for exact match first
+            if (dictionary.has(lowerWord)) {
+                return [];
+            }
+            
+            // Find words with small edit distance
+            for (const dictWord of dictionary) {
+                if (Math.abs(dictWord.length - lowerWord.length) > maxDistance) continue;
+                
+                const distance = levenshteinDistance(lowerWord, dictWord);
+                if (distance <= maxDistance) {
+                    suggestions.push({ word: dictWord, distance });
+                }
+                
+                // Early exit if we have enough good matches
+                if (suggestions.length >= maxSuggestions * 2) {
+                    break;
+                }
+            }
+            
+            // Sort by distance and take top suggestions
+            return suggestions
+                .sort((a, b) => a.distance - b.distance)
+                .slice(0, maxSuggestions)
+                .map(s => s.word);
+        }
+        
+        // Global functions that will be called from C#
+        window.spellCheck = {
+            // Check if a word is spelled correctly
+            checkSpelling: function(word) {
+                // Convert to lowercase for case-insensitive comparison
+                const lowerWord = word.toLowerCase();
+                
+                // Skip very short words and words with numbers/symbols
+                if (!/^[a-z']{2,}$/i.test(word)) {
+                    return { isCorrect: true, suggestions: [] };
+                }
+                
+                const isCorrect = dictionary.has(lowerWord);
+                const suggestions = isCorrect ? [] : getSuggestions(lowerWord);
+                
+                return { isCorrect, suggestions };
+            },
+            
+            // Get suggestions for a word
+            getSuggestions: function(word) {
+                return getSuggestions(word);
+            }
+        };
+    </script>
+</body>
+
+</html>

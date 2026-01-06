@@ -1,0 +1,20 @@
+// A basic English dictionary for spell checking
+const englishDictionary = [
+    // Common words
+    'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'I', 'it', 'for', 'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at',
+    'this', 'but', 'his', 'by', 'from', 'they', 'we', 'say', 'her', 'she', 'or', 'an', 'will', 'my', 'one', 'all', 'would', 'there', 'their', 'what',
+    'up', 'out', 'if', 'about', 'who', 'get', 'which', 'go', 'me', 'when', 'make', 'can', 'like', 'time', 'no', 'just', 'him', 'know', 'take', 'people',
+    'into', 'year', 'your', 'good', 'some', 'could', 'them', 'see', 'other', 'than', 'then', 'now', 'look', 'only', 'come', 'its', 'over', 'think', 'also',
+    'back', 'after', 'use', 'two', 'how', 'our', 'work', 'first', 'well', 'way', 'even', 'new', 'want', 'because', 'any', 'these', 'give', 'day', 'most', 'us',
+    
+    // Add more words as needed
+];
+
+// Function to check if a word is in the dictionary
+window.checkSpelling = function(word) {
+    // Convert to lowercase for case-insensitive comparison
+    const lowerWord = word.toLowerCase();
+    
+    // Check if the word is in the dictionary
+    return englishDictionary.includes(lowerWord);
+};
